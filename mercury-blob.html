@@ -1,0 +1,240 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Interactive Mercury Blob</title>
+    <style>
+        body { 
+            margin: 0; 
+            overflow: hidden; 
+            background: #1a1a1a;
+            cursor: grab;
+        }
+        body.grabbing {
+            cursor: grabbing;
+        }
+        canvas { 
+            display: block; 
+        }
+    </style>
+</head>
+<body>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <script>
+        // Scene setup
+        const scene = new THREE.Scene();
+        const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
+        const renderer = new THREE.WebGLRenderer({ antialias: true });
+        renderer.setSize(window.innerWidth, window.innerHeight);
+        renderer.setPixelRatio(window.devicePixelRatio);
+        document.body.appendChild(renderer.domElement);
+
+        // Camera position
+        camera.position.set(0, 2, 4);
+        camera.lookAt(0, 0, 0);
+
+        // Lighting for metallic effect
+        const ambientLight = new THREE.AmbientLight(0xffffff, 0.3);
+        scene.add(ambientLight);
+
+        const pointLight1 = new THREE.PointLight(0xffffff, 1);
+        pointLight1.position.set(5, 5, 5);
+        scene.add(pointLight1);
+
+        const pointLight2 = new THREE.PointLight(0xffffff, 0.5);
+        pointLight2.position.set(-5, -5, -5);
+        scene.add(pointLight2);
+
+        // Ground plane for the mercury to rest on
+        const planeGeometry = new THREE.PlaneGeometry(10, 10);
+        const planeMaterial = new THREE.MeshStandardMaterial({ 
+            color: 0x222222,
+            roughness: 0.8,
+            metalness: 0.2
+        });
+        const plane = new THREE.Mesh(planeGeometry, planeMaterial);
+        plane.rotation.x = -Math.PI / 2;
+        scene.add(plane);
+
+        // Create blob geometry with metaballs simulation
+        class MercuryBlob {
+            constructor() {
+                this.particles = [];
+                this.numParticles = 50;
+                this.baseRadius = 0.2;
+                
+                // Create initial sphere geometry for visualization
+                this.geometry = new THREE.SphereGeometry(1, 64, 64);
+                
+                // Custom shader material for mercury effect
+                this.material = new THREE.ShaderMaterial({
+                    uniforms: {
+                        time: { value: 0 },
+                        mouseInfluence: { value: 0 },
+                        mousePos: { value: new THREE.Vector2(0, 0) }
+                    },
+                    vertexShader: `
+                        varying vec3 vNormal;
+                        varying vec3 vPosition;
+                        uniform float time;
+                        uniform float mouseInfluence;
+                        uniform vec2 mousePos;
+
+                        void main() {
+                            vNormal = normal;
+                            
+                            // Add organic movement
+                            vec3 pos = position;
+                            float noise = sin(pos.x * 2.0 + time) * 
+                                        cos(pos.y * 2.0 + time) * 
+                                        sin(pos.z * 2.0 + time) * 0.1;
+                            
+                            // Add mouse influence
+                            vec2 mouseOffset = position.xy - mousePos;
+                            float mouseDist = length(mouseOffset);
+                            float mouseDeform = smoothstep(1.0, 0.0, mouseDist) * mouseInfluence;
+                            pos += normal * (noise + mouseDeform * 0.2);
+                            
+                            vPosition = pos;
+                            gl_Position = projectionMatrix * modelViewMatrix * vec4(pos, 1.0);
+                        }
+                    `,
+                    fragmentShader: `
+                        varying vec3 vNormal;
+                        varying vec3 vPosition;
+                        uniform float time;
+
+                        void main() {
+                            // Base mercury color
+                            vec3 baseColor = vec3(0.75, 0.75, 0.78);
+                            
+                            // Enhanced metallic reflection
+                            vec3 normal = normalize(vNormal);
+                            float fresnel = pow(1.0 - abs(dot(normal, vec3(0.0, 0.0, 1.0))), 3.0);
+                            
+                            // Dynamic reflection pattern
+                            float pattern = sin(vPosition.x * 10.0 + time) * 
+                                          cos(vPosition.y * 10.0 + time) * 0.1;
+                            
+                            // Combine effects
+                            vec3 color = mix(baseColor, vec3(1.0), fresnel + pattern);
+                            
+                            // Add specular highlight
+                            float specular = pow(max(0.0, dot(normal, normalize(vec3(1.0, 1.0, 1.0)))), 32.0);
+                            color += vec3(specular);
+                            
+                            gl_FragColor = vec4(color, 1.0);
+                        }
+                    `,
+                    side: THREE.DoubleSide
+                });
+
+                this.mesh = new THREE.Mesh(this.geometry, this.material);
+                this.mesh.position.y = 0.5;
+                scene.add(this.mesh);
+
+                // Physics properties
+                this.velocity = new THREE.Vector3();
+                this.acceleration = new THREE.Vector3();
+                this.damping = 0.98;
+                this.mouseForce = new THREE.Vector3();
+            }
+
+            update(deltaTime, mousePosition) {
+                // Update shader uniforms
+                this.material.uniforms.time.value += deltaTime;
+                
+                // Apply physics
+                if (mousePosition) {
+                    const distance = this.mesh.position.distanceTo(mousePosition);
+                    if (distance < 2) {
+                        this.mouseForce.subVectors(mousePosition, this.mesh.position);
+                        this.mouseForce.normalize();
+                        this.mouseForce.multiplyScalar(0.01);
+                        this.acceleration.add(this.mouseForce);
+                    }
+                }
+
+                // Apply gravity
+                this.acceleration.y -= 0.001;
+
+                // Update velocity and position
+                this.velocity.add(this.acceleration);
+                this.velocity.multiplyScalar(this.damping);
+                this.mesh.position.add(this.velocity);
+
+                // Constrain to ground
+                if (this.mesh.position.y < 0.5) {
+                    this.mesh.position.y = 0.5;
+                    this.velocity.y = 0;
+                }
+
+                // Reset acceleration
+                this.acceleration.set(0, 0, 0);
+            }
+        }
+
+        // Create mercury blob
+        const mercuryBlob = new MercuryBlob();
+
+        // Mouse interaction
+        const mouse = new THREE.Vector2();
+        const raycaster = new THREE.Raycaster();
+        let isDragging = false;
+        let mousePosition = new THREE.Vector3();
+
+        document.addEventListener('mousemove', (event) => {
+            mouse.x = (event.clientX / window.innerWidth) * 2 - 1;
+            mouse.y = -(event.clientY / window.innerHeight) * 2 + 1;
+
+            raycaster.setFromCamera(mouse, camera);
+            const intersects = raycaster.intersectObject(plane);
+            
+            if (intersects.length > 0) {
+                mousePosition.copy(intersects[0].point);
+                mercuryBlob.material.uniforms.mousePos.value.set(
+                    mousePosition.x,
+                    mousePosition.z
+                );
+            }
+
+            if (isDragging) {
+                document.body.classList.add('grabbing');
+                mercuryBlob.material.uniforms.mouseInfluence.value = 1.0;
+            }
+        });
+
+        document.addEventListener('mousedown', () => {
+            isDragging = true;
+            document.body.classList.add('grabbing');
+        });
+
+        document.addEventListener('mouseup', () => {
+            isDragging = false;
+            document.body.classList.remove('grabbing');
+            mercuryBlob.material.uniforms.mouseInfluence.value = 0.0;
+        });
+
+        // Handle window resize
+        window.addEventListener('resize', () => {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+        });
+
+        // Animation loop
+        const clock = new THREE.Clock();
+
+        function animate() {
+            requestAnimationFrame(animate);
+            
+            const deltaTime = clock.getDelta();
+            mercuryBlob.update(deltaTime, isDragging ? mousePosition : null);
+            
+            renderer.render(scene, camera);
+        }
+
+        animate();
+    </script>
+</body>
+</html> 
