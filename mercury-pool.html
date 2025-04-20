@@ -1,0 +1,223 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Mercury Donut Effect</title>
+    <style>
+        body { 
+            margin: 0; 
+            overflow: hidden; 
+            background: #000;
+            cursor: grab;
+        }
+        body.grabbing {
+            cursor: grabbing;
+        }
+        canvas { 
+            display: block; 
+        }
+    </style>
+</head>
+<body>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <script>
+        // Scene setup
+        const scene = new THREE.Scene();
+        const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
+        const renderer = new THREE.WebGLRenderer({ antialias: true });
+        renderer.setSize(window.innerWidth, window.innerHeight);
+        renderer.setPixelRatio(window.devicePixelRatio);
+        document.body.appendChild(renderer.domElement);
+
+        // Camera position
+        camera.position.z = 5;
+
+        // Lighting setup for metallic effect
+        const ambientLight = new THREE.AmbientLight(0xffffff, 0.3);
+        scene.add(ambientLight);
+
+        const pointLight1 = new THREE.PointLight(0xffffff, 1);
+        pointLight1.position.set(5, 5, 5);
+        scene.add(pointLight1);
+
+        const pointLight2 = new THREE.PointLight(0xffffff, 0.5);
+        pointLight2.position.set(-5, -5, -5);
+        scene.add(pointLight2);
+
+        // Create a torus (donut) for the mercury
+        const geometry = new THREE.TorusGeometry(2, 0.5, 64, 128);
+        
+        // Shader uniforms for the mercury effect
+        const uniforms = {
+            time: { value: 0 },
+            mousePosition: { value: new THREE.Vector2(0, 0) },
+            mouseDown: { value: false },
+            holeSize: { value: 0 }
+        };
+
+        // Vertex shader for liquid movement
+        const vertexShader = `
+            varying vec2 vUv;
+            varying vec3 vNormal;
+            varying vec3 vPosition;
+            uniform vec2 mousePosition;
+            uniform float time;
+            uniform bool mouseDown;
+            uniform float holeSize;
+            
+            void main() {
+                vUv = uv;
+                
+                // Base position
+                vec3 pos = position;
+                
+                // Calculate distance from center in torus coordinates
+                float distFromCenter = length(pos.xy);
+                float angle = atan(pos.y, pos.x);
+                
+                // Create hole effect
+                float hole = 0.0;
+                if (mouseDown) {
+                    // Smooth hole creation
+                    float holeRadius = 0.5 + holeSize;
+                    float distToHole = abs(distFromCenter - 2.0);
+                    hole = smoothstep(holeRadius, holeRadius - 0.2, distToHole) * holeSize;
+                }
+                
+                // Add organic movement
+                float organic = sin(time * 2.0 + angle * 5.0) * 0.1;
+                organic += sin(time * 1.5 + distFromCenter * 3.0) * 0.1;
+                
+                // Combine effects
+                pos += normalize(pos) * (organic - hole);
+                
+                // Store position and normal
+                vPosition = pos;
+                vNormal = normalize(pos);
+                
+                gl_Position = projectionMatrix * modelViewMatrix * vec4(pos, 1.0);
+            }
+        `;
+
+        // Fragment shader for metallic appearance
+        const fragmentShader = `
+            varying vec2 vUv;
+            varying vec3 vNormal;
+            varying vec3 vPosition;
+            uniform float time;
+            
+            void main() {
+                // Base mercury color (dark gray with slight blue tint)
+                vec3 baseColor = vec3(0.2, 0.22, 0.25);
+                
+                // Fresnel effect for metallic shine
+                float fresnel = pow(1.0 - abs(dot(normalize(vNormal), vec3(0.0, 0.0, 1.0))), 2.0);
+                
+                // Add subtle color variation
+                vec3 colorVariation = vec3(
+                    0.1 * sin(time + vUv.x * 10.0),
+                    0.1 * sin(time + vUv.y * 10.0 + 2.0),
+                    0.1 * sin(time + (vUv.x + vUv.y) * 10.0 + 4.0)
+                );
+                
+                // Combine effects
+                vec3 finalColor = mix(baseColor, baseColor + colorVariation, fresnel);
+                
+                // Add specular highlight
+                float specular = pow(max(0.0, dot(reflect(vec3(0.0, 0.0, 1.0), vNormal), vec3(0.0, 0.0, 1.0))), 32.0);
+                finalColor += vec3(specular * 0.5);
+                
+                // Add rim lighting
+                float rim = pow(1.0 - abs(dot(vNormal, vec3(0.0, 0.0, 1.0))), 2.0);
+                finalColor += vec3(rim * 0.3);
+                
+                gl_FragColor = vec4(finalColor, 1.0);
+            }
+        `;
+
+        // Create material
+        const material = new THREE.ShaderMaterial({
+            uniforms: uniforms,
+            vertexShader: vertexShader,
+            fragmentShader: fragmentShader,
+            side: THREE.DoubleSide
+        });
+
+        // Create mesh
+        const mercury = new THREE.Mesh(geometry, material);
+        scene.add(mercury);
+
+        // Mouse interaction
+        let isMouseDown = false;
+        let targetHoleSize = 0;
+        let isDragging = false;
+        let previousMousePosition = { x: 0, y: 0 };
+        let rotationSpeed = 0.01;
+
+        document.addEventListener('mousemove', (event) => {
+            uniforms.mousePosition.value.x = (event.clientX / window.innerWidth) * 2 - 1;
+            uniforms.mousePosition.value.y = -(event.clientY / window.innerHeight) * 2 + 1;
+
+            if (isDragging) {
+                const deltaX = event.clientX - previousMousePosition.x;
+                const deltaY = event.clientY - previousMousePosition.y;
+                
+                mercury.rotation.y += deltaX * rotationSpeed;
+                mercury.rotation.x += deltaY * rotationSpeed;
+                
+                previousMousePosition.x = event.clientX;
+                previousMousePosition.y = event.clientY;
+            }
+        });
+
+        document.addEventListener('mousedown', (event) => {
+            isMouseDown = true;
+            uniforms.mouseDown.value = true;
+            targetHoleSize = 1.0;
+            
+            // Start dragging
+            isDragging = true;
+            previousMousePosition.x = event.clientX;
+            previousMousePosition.y = event.clientY;
+            document.body.classList.add('grabbing');
+        });
+
+        document.addEventListener('mouseup', () => {
+            isMouseDown = false;
+            uniforms.mouseDown.value = false;
+            targetHoleSize = 0;
+            
+            // Stop dragging
+            isDragging = false;
+            document.body.classList.remove('grabbing');
+        });
+
+        // Handle window resize
+        window.addEventListener('resize', () => {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+        });
+
+        // Animation loop
+        function animate() {
+            requestAnimationFrame(animate);
+            
+            // Update time
+            uniforms.time.value += 0.01;
+            
+            // Smooth hole size transition
+            uniforms.holeSize.value += (targetHoleSize - uniforms.holeSize.value) * 0.1;
+            
+            // Add subtle automatic rotation when not dragging
+            if (!isDragging) {
+                mercury.rotation.y += 0.001;
+            }
+            
+            renderer.render(scene, camera);
+        }
+
+        animate();
+    </script>
+</body>
+</html> 
