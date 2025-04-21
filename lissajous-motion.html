@@ -1,0 +1,92 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Lissajous Motion Graphic</title>
+  <style>
+    body { margin: 0; background: #f5f5f5; overflow: hidden; }
+    canvas { display: block; width: 100vw; height: 100vh; }
+    #hint { position: fixed; top: 20px; left: 0; width: 100vw; text-align: center; color: #222; font-family: sans-serif; font-size: 1.2em; pointer-events: none; }
+  </style>
+</head>
+<body>
+  <div id="hint">Click or poke the shape!</div>
+  <canvas id="lissajous"></canvas>
+  <script>
+    const canvas = document.getElementById('lissajous');
+    const ctx = canvas.getContext('2d');
+    let width = window.innerWidth;
+    let height = window.innerHeight;
+    canvas.width = width;
+    canvas.height = height;
+
+    // Lissajous/harmonograph parameters
+    let t = 0;
+    let animSpeed = 0.01;
+    let targetSpeed = 0.01;
+    let rotation = 0;
+    let targetRotation = 0;
+    let unravel = 0;
+    let targetUnravel = 0;
+
+    function drawLissajous() {
+      ctx.clearRect(0, 0, width, height);
+      ctx.save();
+      ctx.translate(width/2, height/2);
+      ctx.rotate(rotation);
+      const lines = 36;
+      for (let j = 0; j < lines; j++) {
+        ctx.beginPath();
+        let phase = j * Math.PI * 2 / lines;
+        for (let i = 0; i <= 1000; i++) {
+          // Parametric Lissajous/harmonograph
+          const a = 180 + 60 * Math.sin(t + phase + unravel * Math.sin(t + phase));
+          const b = 3;
+          const c = 2;
+          const d = Math.PI/2 + phase + 0.2 * Math.sin(t + phase);
+          const e = Math.PI/4 + phase + 0.3 * Math.cos(t + phase);
+          const x = a * Math.sin(b * i * 0.006 + d);
+          const y = a * Math.sin(c * i * 0.006 + e);
+          if (i === 0) ctx.moveTo(x, y);
+          else ctx.lineTo(x, y);
+        }
+        ctx.globalAlpha = 0.25 + 0.7 * (j / lines);
+        ctx.strokeStyle = '#111';
+        ctx.lineWidth = 1.3;
+        ctx.stroke();
+      }
+      ctx.restore();
+    }
+
+    function animate() {
+      // Smoothly approach target values
+      animSpeed += (targetSpeed - animSpeed) * 0.08;
+      rotation += (targetRotation - rotation) * 0.06;
+      unravel += (targetUnravel - unravel) * 0.06;
+      t += animSpeed;
+      drawLissajous();
+      requestAnimationFrame(animate);
+    }
+
+    // Interaction: poke to rotate and unravel
+    canvas.addEventListener('pointerdown', e => {
+      targetRotation += Math.PI / 6 * (Math.random() > 0.5 ? 1 : -1);
+      targetSpeed = 0.03 + Math.random() * 0.04;
+      targetUnravel = 0.7 + Math.random() * 0.7;
+    });
+    canvas.addEventListener('pointerup', e => {
+      targetSpeed = 0.01;
+      targetUnravel = 0;
+    });
+
+    window.addEventListener('resize', () => {
+      width = window.innerWidth;
+      height = window.innerHeight;
+      canvas.width = width;
+      canvas.height = height;
+    });
+
+    animate();
+  </script>
+</body>
+</html>
