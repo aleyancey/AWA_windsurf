@@ -1,0 +1,233 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Luminescent Swarm</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/p5.js/1.4.0/p5.js"></script>
+    <style>
+        body {
+            margin: 0;
+            padding: 0;
+            overflow: hidden;
+            background: #000;
+        }
+        canvas {
+            display: block;
+        }
+    </style>
+</head>
+<body>
+    <script>
+        // Configuration parameters
+        let particles = [];
+        let touchActive = false;
+        let glowIntensity = 0;
+        let particleDensity = 65;  // Reduced number of particles
+        let maxParticles = 130;    // Maximum particles when holding
+        let swarmCenter = { x: 0, y: 0 }; // Center point of the swarm
+        let lastMouseX, lastMouseY;
+        
+        // Enhanced neon cyan and phosho-green color palette with higher saturation
+        const colors = [
+            [0, 255, 255],      // Pure cyan
+            [0, 255, 200],      // Bright cyan-green
+            [50, 255, 180],     // Seafoam green
+            [0, 200, 255],      // Deep cyan
+            [80, 255, 230]      // Phosphorescent green
+        ];
+
+        /**
+         * Particle class representing a single glowing point in the swarm animation
+         * Each particle follows the mouse with unique irregular movement
+         * and high-contrast glowing effects that intensify with interaction
+         */
+        class Particle {
+            constructor() {
+                this.reset();
+                this.color = random(colors);
+                this.baseRadius = random(1.8, 3.5); // Smaller core size
+                this.noiseOffsetX = random(1000);
+                this.noiseOffsetY = random(1000);
+                this.moveSpeed = random(0.001, 0.003);
+                this.pulseSpeed = random(0.01, 0.03);
+                this.maxGlow = random(3, 5); // Smaller glow radius
+                this.swarmOffset = random(TWO_PI);
+                this.swarmRadius = random(50, 150);
+                this.swarmSpeed = random(0.01, 0.03);
+                this.followStrength = random(0.01, 0.06);
+                this.independenceLevel = random(0.2, 1.0);
+            }
+
+            reset() {
+                this.x = random(width);
+                this.y = random(height);
+                this.vx = 0;
+                this.vy = 0;
+                this.alpha = random(100, 180); // Higher base alpha for more contrast
+                this.pulsePhase = random(TWO_PI);
+                this.lifeForce = random(0.8, 1.2); // More variation in brightness
+                this.glowMultiplier = random(0.9, 1.4); // Increased individual glow variation
+                this.swarmAngle = random(TWO_PI);
+            }
+
+            update() {
+                // Update noise offsets
+                this.noiseOffsetX += this.moveSpeed;
+                this.noiseOffsetY += this.moveSpeed;
+                
+                // Update swarm angle
+                this.swarmAngle += this.swarmSpeed;
+                
+                // Calculate target position based on swarm center with circular formation
+                let targetX = swarmCenter.x + cos(this.swarmAngle + this.swarmOffset) * this.swarmRadius;
+                let targetY = swarmCenter.y + sin(this.swarmAngle + this.swarmOffset) * this.swarmRadius;
+                
+                // Add noise-based irregularity to movement
+                targetX += (noise(this.noiseOffsetX) - 0.5) * 100 * this.independenceLevel;
+                targetY += (noise(this.noiseOffsetY) - 0.5) * 100 * this.independenceLevel;
+                
+                // Calculate direction vector toward target
+                let dx = targetX - this.x;
+                let dy = targetY - this.y;
+                
+                // Apply acceleration toward target
+                this.vx = lerp(this.vx, dx * this.followStrength, 0.1);
+                this.vy = lerp(this.vy, dy * this.followStrength, 0.1);
+                
+                // Update position
+                this.x += this.vx;
+                this.y += this.vy;
+                
+                // Contain particles within the screen with bounce effect
+                const margin = 50;
+                if (this.x < margin || this.x > width - margin) {
+                    this.vx *= -0.5;
+                }
+                if (this.y < margin || this.y > height - margin) {
+                    this.vy *= -0.5;
+                }
+
+                // Pulsing effect with higher contrast
+                this.pulsePhase += this.pulseSpeed;
+                let basePulse = sin(this.pulsePhase) * 0.4 + 0.6; // More pronounced pulsing
+                
+                // Calculate distance to swarm center for additional glow effect
+                let distToCenter = dist(this.x, this.y, swarmCenter.x, swarmCenter.y);
+                let centerEffect = map(distToCenter, 0, 150, 0.4, 0, true);
+                
+                // Increase glow when touch is active or close to swarm center
+                let touchFactor = touchActive ? glowIntensity * 1.2 : 0; // Enhanced touch response
+                let glowFactor = basePulse + touchFactor + centerEffect;
+                this.alpha = map(glowFactor, 0, 2.0, 70, 230) * this.lifeForce * this.glowMultiplier;
+            }
+
+            draw() {
+                // Enhanced radius with touch and proximity effects
+                let glowFactor = (touchActive ? glowIntensity * 1.5 : 0);
+                let distToCenter = dist(this.x, this.y, swarmCenter.x, swarmCenter.y);
+                let proximityEffect = map(distToCenter, 0, 100, 0.6, 0, true);
+                let radius = this.baseRadius * (1 + glowFactor + proximityEffect);
+                
+                let [r, g, b] = this.color;
+                
+                // Create a high-contrast glow effect with sharper falloff
+                noStroke();
+                
+                // Outer glow layers with increased intensity but smaller radius
+                for (let i = this.maxGlow; i > 0; i--) {
+                    // Sharper falloff in opacity for higher contrast
+                    let layerAlpha = this.alpha / (i * 0.9);
+                    fill(r, g, b, layerAlpha);
+                    circle(this.x, this.y, radius * i * 1.8); // Smaller radius multiplier
+                }
+                
+                // Middle glow layer with more saturation
+                fill(min(r + 30, 255), min(g + 30, 255), min(b + 30, 255), this.alpha * 1.8);
+                circle(this.x, this.y, radius * 1.5);
+                
+                // Inner core with stronger glow and increased saturation
+                fill(min(r + 80, 255), min(g + 80, 255), min(b + 80, 255), this.alpha * 2.5);
+                circle(this.x, this.y, radius);
+                
+                // Bright center point
+                fill(255, 255, 255, this.alpha * 0.9);
+                circle(this.x, this.y, radius * 0.3);
+            }
+        }
+
+        function setup() {
+            createCanvas(windowWidth, windowHeight);
+            background(0);
+            
+            // Initialize with swarm center at middle of screen
+            swarmCenter.x = width/2;
+            swarmCenter.y = height/2;
+            lastMouseX = width/2;
+            lastMouseY = height/2;
+            
+            // Initialize particles
+            for (let i = 0; i < particleDensity; i++) {
+                particles.push(new Particle());
+            }
+        }
+
+        function draw() {
+            // Dark background with subtle fade for trailing effect
+            background(0, 8); // Longer trails
+            
+            // Update swarm center based on mouse position with smooth following
+            if (mouseX !== 0 && mouseY !== 0) {
+                lastMouseX = mouseX;
+                lastMouseY = mouseY;
+            }
+            swarmCenter.x = lerp(swarmCenter.x, lastMouseX, 0.05);
+            swarmCenter.y = lerp(swarmCenter.y, lastMouseY, 0.05);
+            
+            // Update glow intensity with smoother transition
+            if (touchActive) {
+                glowIntensity = min(glowIntensity + 0.04, 1);
+                
+                // Gradually increase particle count while holding
+                if (particles.length < maxParticles && frameCount % 4 === 0) {
+                    particles.push(new Particle());
+                }
+            } else {
+                glowIntensity = max(glowIntensity - 0.01, 0);
+                
+                // Gradually decrease particle count when not holding
+                if (particles.length > particleDensity && frameCount % 5 === 0) {
+                    particles.pop();
+                }
+            }
+
+            // Update and draw particles
+            for (let particle of particles) {
+                particle.update();
+                particle.draw();
+            }
+        }
+
+        function mousePressed() {
+            touchActive = true;
+        }
+
+        function mouseReleased() {
+            touchActive = false;
+        }
+
+        function touchStarted() {
+            touchActive = true;
+            return false;
+        }
+
+        function touchEnded() {
+            touchActive = false;
+            return false;
+        }
+
+        function windowResized() {
+            resizeCanvas(windowWidth, windowHeight);
+        }
+    </script>
+</body>
+</html> 
