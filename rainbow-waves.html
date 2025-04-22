@@ -1,0 +1,175 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Rainbow Linear Waves</title>
+  <style>
+    body { margin: 0; background: #f8f4e6; overflow: hidden; }
+    canvas { display: block; width: 100vw; height: 100vh; }
+    #hint { position: fixed; top: 20px; left: 0; width: 100vw; text-align: center; color: #333; font-family: sans-serif; font-size: 1.1em; pointer-events: none; }
+  </style>
+</head>
+<body>
+  <div id="hint">Rainbow waves: undulating motion</div>
+  <canvas id="waves"></canvas>
+  <script>
+    const canvas = document.getElementById('waves');
+    const ctx = canvas.getContext('2d');
+    let width = window.innerWidth;
+    let height = window.innerHeight;
+    canvas.width = width;
+    canvas.height = height;
+
+    const rainbow = [
+      '#FFB300', '#FFD54F', '#FF7043', '#E040FB', '#7E57C2', '#29B6F6', '#26A69A', '#66BB6A', '#D4E157', '#FFEE58', '#FFA726', '#FF7043', '#EC407A', '#AB47BC', '#42A5F5', '#26C6DA'
+    ];
+
+    // Interaction state
+    let dragging = false;
+    let draggedLine = null;
+    let dragX = 0, dragY = 0;
+    let dragOffset = 0;
+    let pointerId = null;
+    let holdStart = 0;
+
+    const lines = 14;
+    const amplitude = () => height * 0.13;
+    const spacing = () => height / (lines + 2);
+    let offsets = new Array(lines).fill(0);
+    let velocities = new Array(lines).fill(0);
+    let sagCenters = new Array(lines).fill(0); // concave mode strength
+    let maxHoldTime = 1.5; // seconds to reach full slingshot amplitude
+
+    function drawWaves(time) {
+      ctx.clearRect(0, 0, width, height);
+      for (let j = 0; j < lines; j++) {
+        ctx.save();
+        ctx.beginPath();
+        if (sagCenters[j] > 0.05) {
+          // draw concave string shape
+          const maxDist = width/2;
+          for (let i = 0; i <= width; i += 2) {
+            const ratio = Math.max(-1, Math.min(1, (i - dragX) / maxDist));
+            const sag = offsets[j] * (1 - ratio * ratio) * sagCenters[j];
+            const y = spacing() * (j+1) + sag;
+            if (i === 0) ctx.moveTo(i, y);
+            else ctx.lineTo(i, y);
+          }
+        } else {
+          // standard sine wave
+          for (let i = 0; i <= width; i += 2) {
+            const phase = j * 0.23 + Math.sin(time/1400 + j*0.13) * 0.7;
+            const y = spacing() * (j+1) + amplitude() * Math.sin((i/width)*2*Math.PI + phase + Math.sin(time/1700 + i*0.002 + j*0.11));
+            if (i === 0) ctx.moveTo(i, y);
+            else ctx.lineTo(i, y);
+          }
+        }
+        ctx.strokeStyle = rainbow[j % rainbow.length];
+        ctx.globalAlpha = 0.85;
+        ctx.lineWidth = 2.2;
+        ctx.shadowColor = ctx.strokeStyle;
+        ctx.shadowBlur = 4;
+        ctx.stroke();
+        ctx.restore();
+      }
+    }
+
+    function animate() {
+      const spring = 0.03;
+      const damping = 0.96;
+      for (let j = 0; j < lines; j++) {
+        if (draggedLine === j && dragging) {
+          // Slingshot amplitude based on hold duration
+          velocities[j] = 0;
+          const holdDuration = (performance.now() - holdStart) / 1000;
+          const a = Math.min(holdDuration / maxHoldTime, 1);
+          const maxAmp = spacing() * 1.2;
+          offsets[j] = a * maxAmp;
+          sagCenters[j] = a;
+          continue;
+        } else {
+          const force = -spring * offsets[j];
+          velocities[j] += force;
+          velocities[j] *= damping;
+          offsets[j] += velocities[j];
+          if (Math.abs(offsets[j]) < 0.01 && Math.abs(velocities[j]) < 0.01) {
+            offsets[j] = 0;
+            velocities[j] = 0;
+          }
+        }
+        // decay concave mode
+        sagCenters[j] *= 0.9;
+      }
+      drawWaves(performance.now());
+      requestAnimationFrame(animate);
+    }
+
+    function getWaveAt(y) {
+      // Find the closest wave line to y
+      let minDist = 1e9, idx = null;
+      for (let j = 0; j < lines; j++) {
+        const lineY = spacing() * (j+1);
+        const dist = Math.abs(y - lineY);
+        if (dist < minDist && dist < spacing()/2.1) {
+          minDist = dist;
+          idx = j;
+        }
+      }
+      return idx;
+    }
+
+    canvas.addEventListener('pointerdown', e => {
+      const rect = canvas.getBoundingClientRect();
+      const x = e.clientX - rect.left;
+      const y = e.clientY - rect.top;
+      const idx = getWaveAt(y);
+      if (idx !== null) {
+        dragging = true;
+        pointerId = e.pointerId;
+        draggedLine = idx;
+        dragX = x;
+        dragY = y;
+        dragOffset = 0;
+        holdStart = performance.now();
+        canvas.setPointerCapture(e.pointerId);
+      }
+    });
+
+    canvas.addEventListener('pointermove', e => {
+      if (!dragging || draggedLine === null || e.pointerId !== pointerId) return;
+      const rect = canvas.getBoundingClientRect();
+      const x = e.clientX - rect.left;
+      const y = e.clientY - rect.top;
+      dragOffset = y - (spacing() * (draggedLine+1));
+      dragX = x;
+      dragY = y;
+    });
+
+    canvas.addEventListener('pointerup', e => {
+      if (draggedLine !== null && e.pointerId === pointerId) {
+        dragging = false;
+        const holdDuration = (performance.now() - holdStart) / 1000;
+        const ampFactor = 1 + Math.min(holdDuration * 0.5, 1);
+        const base = dragOffset;
+        const maxAmp = spacing() * 1.2;
+        const target = Math.sign(base) * Math.min(Math.abs(base * ampFactor), maxAmp);
+        offsets[draggedLine] = target;
+        sagCenters[draggedLine] = ampFactor; // enable concave mode
+        velocities[draggedLine] = 0;
+        dragOffset = 0;
+        draggedLine = null;
+        pointerId = null;
+      }
+    });
+
+    window.addEventListener('resize', () => {
+      width = window.innerWidth;
+      height = window.innerHeight;
+      canvas.width = width;
+      canvas.height = height;
+    });
+
+    animate();
+  </script>
+</body>
+</html>

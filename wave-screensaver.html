@@ -1,0 +1,183 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Interactive Wave Screensaver</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/p5.js/1.4.0/p5.js"></script>
+    <style>
+        body {
+            margin: 0;
+            padding: 0;
+            overflow: hidden;
+            background: #000;
+        }
+        canvas {
+            display: block;
+        }
+    </style>
+</head>
+<body>
+    <script>
+        let t = 0;
+        let waves = [];
+        let mouseInfluence = { x: 0, y: 0 };
+        let colorSchemes = [
+            // Neon blue scheme
+            [[100, 200, 255], [50, 150, 255], [0, 100, 255], [150, 220, 255], [200, 230, 255]],
+            // Purple-pink scheme
+            [[255, 100, 255], [200, 50, 255], [150, 0, 255], [255, 150, 220], [255, 200, 230]],
+            // Cyan-green scheme
+            [[0, 255, 200], [0, 200, 150], [0, 150, 100], [50, 255, 180], [100, 255, 160]]
+        ];
+        let currentScheme = 0;
+        let particleSystem;
+
+        class Particle {
+            constructor(x, y) {
+                this.pos = createVector(x, y);
+                this.vel = createVector(random(-1, 1), random(-1, 1));
+                this.acc = createVector();
+                this.life = 255;
+                this.decay = random(2, 4);
+            }
+
+            update() {
+                this.vel.add(this.acc);
+                this.pos.add(this.vel);
+                this.acc.mult(0);
+                this.life -= this.decay;
+            }
+
+            show() {
+                if (this.life > 0) {
+                    stroke(colorSchemes[currentScheme][0][0], 
+                           colorSchemes[currentScheme][0][1], 
+                           colorSchemes[currentScheme][0][2], 
+                           this.life);
+                    point(this.pos.x, this.pos.y);
+                }
+            }
+
+            isDead() {
+                return this.life <= 0;
+            }
+        }
+
+        class ParticleSystem {
+            constructor() {
+                this.particles = [];
+            }
+
+            addParticle(x, y) {
+                this.particles.push(new Particle(x, y));
+            }
+
+            update() {
+                for (let i = this.particles.length - 1; i >= 0; i--) {
+                    let p = this.particles[i];
+                    p.update();
+                    if (p.isDead()) {
+                        this.particles.splice(i, 1);
+                    }
+                }
+            }
+
+            show() {
+                for (let p of this.particles) {
+                    p.show();
+                }
+            }
+        }
+
+        function setup() {
+            createCanvas(windowWidth, windowHeight);
+            background(0);
+            strokeWeight(1.5);
+            noFill();
+            frameRate(60);
+            particleSystem = new ParticleSystem();
+
+            // Initialize wave parameters
+            for (let i = 0; i < 5; i++) {
+                waves.push({
+                    amplitude: random(50, 100),
+                    frequency: random(2, 4),
+                    phase: random(TWO_PI),
+                    speed: random(0.005, 0.015)
+                });
+            }
+        }
+
+        function draw() {
+            background(0, 20); // Fading trails
+            translate(width / 2, height / 2);
+
+            // Update mouse influence
+            let mx = mouseX - width / 2;
+            let my = mouseY - height / 2;
+            mouseInfluence.x = lerp(mouseInfluence.x, mx, 0.1);
+            mouseInfluence.y = lerp(mouseInfluence.y, my, 0.1);
+
+            // Draw waves
+            for (let i = 0; i < 5; i++) {
+                let wave = waves[i];
+                let colors = colorSchemes[currentScheme][i];
+                let alpha = map(i, 0, 4, 255, 50);
+
+                stroke(colors[0], colors[1], colors[2], alpha);
+                beginShape();
+                for (let a = 0; a < TWO_PI; a += 0.05) {
+                    // Calculate base radius with wave effect
+                    let r = 150 + sin(a * wave.frequency + t + wave.phase) * wave.amplitude;
+                    
+                    // Add mouse influence
+                    let distToMouse = dist(mouseInfluence.x, mouseInfluence.y, r * cos(a), r * sin(a));
+                    let mouseEffect = map(distToMouse, 0, 200, 30, 0, true);
+                    r += mouseEffect;
+
+                    // Calculate final position
+                    let x = r * cos(a);
+                    let y = r * sin(a);
+                    
+                    // Add vertex with smooth curve
+                    curveVertex(x, y);
+
+                    // Add particles on wave peaks
+                    if (random(1) < 0.03 && frameCount % 2 === 0) {
+                        particleSystem.addParticle(x, y);
+                    }
+                }
+                endShape(CLOSE);
+
+                // Update wave parameters
+                wave.phase += wave.speed;
+            }
+
+            // Update and display particles
+            particleSystem.update();
+            particleSystem.show();
+
+            t += 0.01;
+        }
+
+        function mousePressed() {
+            // Cycle through color schemes on click
+            currentScheme = (currentScheme + 1) % colorSchemes.length;
+        }
+
+        function windowResized() {
+            resizeCanvas(windowWidth, windowHeight);
+        }
+
+        // Add touch support for mobile
+        function touchStarted() {
+            mousePressed();
+            return false;
+        }
+
+        function touchMoved() {
+            return false;
+        }
+    </script>
+</body>
+</html> 
