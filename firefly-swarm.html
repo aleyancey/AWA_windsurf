@@ -20,157 +20,150 @@
     <script>
         let particles = [];
         let holdDuration = 0;
-        let maxHoldTime = 2000; // ms to reach max intensity
+        let maxHoldTime = 3000; // 3 seconds to reach max intensity
+        let baseGlow = 40;
+        let maxGlow = 100;
         let touchActive = false;
         let touchPos;
-        let baseParticleCount = 200;
-        let maxExtraParticles = 300;
+        let attractorForce = 0;
+        let swarmCenter;
+        let swarmRadius;
 
         class Particle {
-            constructor(x, y) {
-                this.pos = createVector(x || random(width), y || random(height));
-                this.vel = p5.Vector.random2D().mult(random(0.5, 2));
-                this.acc = createVector();
-                this.size = random(3, 6);
-                this.color = {
-                    h: random([
-                        color(0, 255, 128),  // Neon green
-                        color(0, 255, 255),  // Neon cyan
-                        color(255, 0, 255),  // Neon magenta
-                        color(128, 0, 255),  // Neon purple
-                        color(255, 255, 0)   // Neon yellow
-                    ]),
-                    alpha: random(100, 200)
-                };
+            constructor() {
+                this.reset();
                 this.angle = random(TWO_PI);
-                this.angleVel = random(-0.02, 0.02);
-                this.radius = random(50, 150);
-                this.centerAttraction = random(0.001, 0.003);
-                this.originalSize = this.size;
+                this.orbitSpeed = random(0.001, 0.003);
+                this.orbitRadius = random(50, 200);
+                this.phase = random(TWO_PI);
             }
 
-            update(touchPos, touchIntensity) {
-                // Circular motion
-                this.angle += this.angleVel;
-                let center = createVector(width/2, height/2);
-                
-                // Calculate target position on circular path
-                let targetX = center.x + cos(this.angle) * this.radius;
-                let targetY = center.y + sin(this.angle) * this.radius;
-                let target = createVector(targetX, targetY);
-                
-                // Add attraction to circular path
-                let attraction = p5.Vector.sub(target, this.pos);
-                attraction.mult(this.centerAttraction);
-                this.acc.add(attraction);
+            reset() {
+                this.color = color(
+                    random([
+                        color(0, 255, 128), // Neon green
+                        color(0, 255, 255), // Neon cyan
+                        color(255, 0, 255), // Neon magenta
+                        color(255, 255, 0)  // Neon yellow
+                    ])
+                );
+                this.size = random(3, 6);
+                this.pulsePhase = random(TWO_PI);
+                this.pulseSpeed = random(0.02, 0.05);
+            }
 
-                // Touch influence
-                if (touchPos) {
-                    let d = p5.Vector.dist(this.pos, touchPos);
+            update() {
+                // Update orbit
+                this.angle += this.orbitSpeed;
+                this.pulsePhase += this.pulseSpeed;
+
+                // Calculate base position on orbit
+                let orbitX = swarmCenter.x + cos(this.angle) * this.orbitRadius;
+                let orbitY = swarmCenter.y + sin(this.angle) * this.orbitRadius;
+                
+                // Add some organic movement
+                let wobble = 20 * sin(this.pulsePhase);
+                this.x = orbitX + wobble * cos(this.angle + HALF_PI);
+                this.y = orbitY + wobble * sin(this.angle + HALF_PI);
+
+                // If touch is active, attract particles
+                if (touchActive && touchPos) {
+                    let d = dist(this.x, this.y, touchPos.x, touchPos.y);
                     if (d < 200) {
-                        let force = p5.Vector.sub(touchPos, this.pos);
-                        force.setMag(0.2 * touchIntensity);
-                        this.acc.add(force);
-                        
-                        // Increase size and brightness near touch
-                        let sizeFactor = map(d, 0, 200, 2.5, 1);
-                        this.size = this.originalSize * sizeFactor * (1 + touchIntensity);
-                        this.color.alpha = map(d, 0, 200, 255, 150) * (1 + touchIntensity * 0.5);
-                    } else {
-                        this.size = lerp(this.size, this.originalSize, 0.1);
-                        this.color.alpha = lerp(this.color.alpha, random(100, 200), 0.1);
+                        let force = map(d, 0, 200, attractorForce, 0);
+                        let angle = atan2(touchPos.y - this.y, touchPos.x - this.x);
+                        this.x += cos(angle) * force;
+                        this.y += sin(angle) * force;
                     }
                 }
-
-                // Update motion
-                this.vel.add(this.acc);
-                this.vel.limit(3);
-                this.pos.add(this.vel);
-                this.acc.mult(0);
-
-                // Wrap around edges
-                if (this.pos.x < 0) this.pos.x = width;
-                if (this.pos.x > width) this.pos.x = 0;
-                if (this.pos.y < 0) this.pos.y = height;
-                if (this.pos.y > height) this.pos.y = 0;
             }
 
             draw() {
-                // Glow effect
-                drawingContext.shadowBlur = this.size * 2;
-                drawingContext.shadowColor = color(red(this.color.h), 
-                                                 green(this.color.h), 
-                                                 blue(this.color.h), 
-                                                 this.color.alpha);
+                let intensity = map(sin(this.pulsePhase), -1, 1, 0.5, 1);
+                if (touchActive) {
+                    intensity = map(holdDuration, 0, maxHoldTime, intensity, 1.5);
+                }
                 
-                // Core
-                noStroke();
-                fill(red(this.color.h), 
-                     green(this.color.h), 
-                     blue(this.color.h), 
-                     this.color.alpha);
-                circle(this.pos.x, this.pos.y, this.size);
+                // Calculate distance-based glow for touch position
+                let touchGlow = 0;
+                if (touchActive && touchPos) {
+                    let d = dist(this.x, this.y, touchPos.x, touchPos.y);
+                    touchGlow = map(d, 0, 200, maxGlow, 0, true);
+                }
+
+                let currentGlow = baseGlow + touchGlow;
                 
-                // Additional glow layers
-                for (let i = 0; i < 3; i++) {
-                    fill(red(this.color.h), 
-                         green(this.color.h), 
-                         blue(this.color.h), 
-                         this.color.alpha * 0.3);
-                    circle(this.pos.x, this.pos.y, this.size * (1 + i * 0.5));
+                // Draw multiple layers for glow effect
+                for (let i = 3; i > 0; i--) {
+                    let size = this.size * i * intensity;
+                    let alpha = map(i, 3, 1, 50, 255);
+                    let c = color(this.color.levels);
+                    c.setAlpha(alpha);
+                    drawingContext.shadowBlur = currentGlow * intensity;
+                    drawingContext.shadowColor = color(
+                        red(this.color),
+                        green(this.color),
+                        blue(this.color),
+                        alpha
+                    ).toString();
+                    fill(c);
+                    noStroke();
+                    circle(this.x, this.y, size);
                 }
             }
         }
 
         function setup() {
             createCanvas(windowWidth, windowHeight);
-            colorMode(RGB);
-            background(0);
+            swarmCenter = createVector(width/2, height/2);
+            swarmRadius = min(width, height) * 0.3;
+            touchPos = createVector(0, 0);
             
-            // Initialize particles
-            for (let i = 0; i < baseParticleCount; i++) {
+            // Create initial particles
+            for (let i = 0; i < 50; i++) {
                 particles.push(new Particle());
             }
-            
-            touchPos = createVector(0, 0);
         }
 
         function draw() {
             background(0, 20);
-            
-            // Update hold duration and calculate intensity
-            let touchIntensity = 0;
+
+            // Update hold duration and attractor force
             if (touchActive) {
                 holdDuration = min(holdDuration + deltaTime, maxHoldTime);
-                touchIntensity = holdDuration / maxHoldTime;
+                attractorForce = map(holdDuration, 0, maxHoldTime, 0, 5);
                 
                 // Add more particles based on hold duration
-                if (particles.length < baseParticleCount + maxExtraParticles * touchIntensity) {
-                    particles.push(new Particle(touchPos.x, touchPos.y));
+                if (frameCount % 10 === 0 && particles.length < 200) {
+                    let newParticles = map(holdDuration, 0, maxHoldTime, 0, 3, true);
+                    for (let i = 0; i < newParticles; i++) {
+                        particles.push(new Particle());
+                    }
                 }
             } else {
                 holdDuration = max(0, holdDuration - deltaTime * 2);
-                // Remove extra particles gradually
-                if (particles.length > baseParticleCount) {
+                attractorForce = 0;
+                
+                // Remove excess particles
+                if (frameCount % 30 === 0 && particles.length > 50) {
                     particles.pop();
                 }
             }
 
             // Update and draw particles
             for (let p of particles) {
-                p.update(touchActive ? touchPos : null, touchIntensity);
+                p.update();
                 p.draw();
             }
         }
 
         function mousePressed() {
             touchActive = true;
-            touchPos = createVector(mouseX, mouseY);
+            touchPos.set(mouseX, mouseY);
         }
 
         function mouseDragged() {
             touchPos.set(mouseX, mouseY);
-            return false;
         }
 
         function mouseReleased() {
@@ -179,6 +172,8 @@
 
         function windowResized() {
             resizeCanvas(windowWidth, windowHeight);
+            swarmCenter.set(width/2, height/2);
+            swarmRadius = min(width, height) * 0.3;
         }
 
         // Mobile touch support
