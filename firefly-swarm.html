@@ -9,7 +9,7 @@
             margin: 0;
             padding: 0;
             overflow: hidden;
-            background: #001a12;
+            background: #000;
         }
         canvas {
             display: block;
@@ -19,120 +19,126 @@
 <body>
     <script>
         let particles = [];
+        let attractPoint = null;
         let holdDuration = 0;
-        let maxHoldTime = 2000; // ms
-        let isHolding = false;
-        let touchPos = null;
-        let baseParticleCount = 200;
-        let maxExtraParticles = 300;
-        let glowIntensity = 0;
+        let maxParticles = 300;
+        let baseGlow = 40;
+        let touchGlow = 0;
+        
+        // Neon color palette
+        const colors = [
+            [0, 255, 200],    // Cyan
+            [255, 0, 255],    // Magenta
+            [255, 255, 0],    // Yellow
+            [0, 255, 100],    // Green
+            [255, 100, 255]   // Pink
+        ];
 
         class Particle {
             constructor(x, y) {
                 this.pos = createVector(x || random(width), y || random(height));
-                this.vel = p5.Vector.random2D().mult(random(0.5, 2));
+                this.vel = p5.Vector.random2D().mult(random(2, 4));
                 this.acc = createVector();
+                this.color = random(colors);
                 this.size = random(3, 6);
-                this.color = {
-                    h: random([120, 160, 200]), // cyan, green, blue hues
-                    s: random(70, 100),
-                    b: random(80, 100),
-                    alpha: random(150, 200)
-                };
-                this.angle = random(TWO_PI);
-                this.angleVel = random(-0.02, 0.02);
-                this.orbitRadius = random(50, 150);
-                this.centerPos = this.pos.copy();
-                this.glowRadius = random(20, 30);
+                this.maxSpeed = random(4, 7);
+                this.phase = random(TWO_PI);
+                this.phaseSpeed = random(0.02, 0.05);
+            }
+
+            applyForce(force) {
+                this.acc.add(force);
             }
 
             update() {
-                // Update orbit center with smooth movement
-                if (touchPos) {
-                    let attraction = p5.Vector.sub(touchPos, this.centerPos);
-                    attraction.mult(0.001);
-                    this.centerPos.add(attraction);
+                // Oscillating size and brightness
+                this.currentSize = this.size + sin(this.phase) * 2;
+                this.phase += this.phaseSpeed;
+
+                // Attraction to mouse/touch point
+                if (attractPoint) {
+                    let force = p5.Vector.sub(attractPoint, this.pos);
+                    let d = force.mag();
+                    d = constrain(d, 5, 25);
+                    let G = 50 * (holdDuration / 60); // Increased attraction with hold
+                    force.setMag(G / (d * d));
+                    this.applyForce(force);
                 }
 
-                // Orbital motion
-                this.angle += this.angleVel;
-                this.pos.x = this.centerPos.x + cos(this.angle) * this.orbitRadius;
-                this.pos.y = this.centerPos.y + sin(this.angle) * this.orbitRadius;
+                // Circular motion tendency
+                let center = createVector(width/2, height/2);
+                let toCenter = p5.Vector.sub(center, this.pos);
+                let circularForce = toCenter.copy().rotate(HALF_PI).setMag(0.3);
+                this.applyForce(circularForce);
 
-                // Add some random movement
-                this.acc.add(p5.Vector.random2D().mult(0.1));
+                // Update motion
                 this.vel.add(this.acc);
-                this.vel.mult(0.95); // damping
-                this.centerPos.add(this.vel);
-
-                // Wrap around screen edges
-                this.centerPos.x = (this.centerPos.x + width) % width;
-                this.centerPos.y = (this.centerPos.y + height) % height;
-
-                // Reset acceleration
+                this.vel.limit(this.maxSpeed);
+                this.pos.add(this.vel);
                 this.acc.mult(0);
 
-                // Update glow based on proximity to touch
-                if (touchPos) {
-                    let d = dist(this.pos.x, this.pos.y, touchPos.x, touchPos.y);
-                    let touchInfluence = map(d, 0, 300, 1, 0, true);
-                    this.glowRadius = lerp(random(20, 30), random(40, 60), touchInfluence * glowIntensity);
-                    this.color.alpha = lerp(random(150, 200), 255, touchInfluence * glowIntensity);
-                }
+                // Wrap around edges
+                if (this.pos.x < 0) this.pos.x = width;
+                if (this.pos.x > width) this.pos.x = 0;
+                if (this.pos.y < 0) this.pos.y = height;
+                if (this.pos.y > height) this.pos.y = 0;
             }
 
             draw() {
-                // Draw glow
-                let glowSize = this.glowRadius * (1 + glowIntensity);
-                colorMode(HSB);
-                noStroke();
-                for (let i = 3; i > 0; i--) {
-                    let alpha = this.color.alpha * (i / 3) * (0.5 + glowIntensity * 0.5);
-                    fill(this.color.h, this.color.s, this.color.b, alpha);
-                    circle(this.pos.x, this.pos.y, glowSize * i / 2);
+                let glowAmount = baseGlow;
+                
+                // Increase glow near attract point
+                if (attractPoint) {
+                    let d = p5.Vector.dist(this.pos, attractPoint);
+                    if (d < 150) {
+                        glowAmount += map(150 - d, 0, 150, 0, touchGlow);
+                    }
                 }
 
-                // Draw core
-                fill(this.color.h, this.color.s, 100, 255);
-                circle(this.pos.x, this.pos.y, this.size * (1 + glowIntensity * 0.5));
+                // Inner glow
+                drawingContext.shadowBlur = glowAmount;
+                drawingContext.shadowColor = `rgb(${this.color[0]}, ${this.color[1]}, ${this.color[2]})`;
+                
+                // Particle core
+                noStroke();
+                fill(this.color[0], this.color[1], this.color[2]);
+                circle(this.pos.x, this.pos.y, this.currentSize);
+
+                // Outer glow
+                let alpha = map(sin(this.phase), -1, 1, 30, 100);
+                fill(this.color[0], this.color[1], this.color[2], alpha);
+                circle(this.pos.x, this.pos.y, this.currentSize * 1.5);
             }
         }
 
         function setup() {
             createCanvas(windowWidth, windowHeight);
-            colorMode(HSB);
-            background(240, 30, 10);
-
+            background(0);
+            
             // Initial particle creation
-            for (let i = 0; i < baseParticleCount; i++) {
+            for (let i = 0; i < maxParticles/2; i++) {
                 particles.push(new Particle());
             }
         }
 
         function draw() {
-            // Semi-transparent background for trail effect
-            background(240, 30, 10, 20);
+            background(0, 20);
 
             // Update hold duration and effects
-            if (isHolding && touchPos) {
-                holdDuration = min(holdDuration + deltaTime, maxHoldTime);
-                let holdProgress = holdDuration / maxHoldTime;
+            if (mouseIsPressed || touches.length > 0) {
+                holdDuration = min(holdDuration + 1, 120);
+                touchGlow = map(holdDuration, 0, 120, 60, 120);
                 
-                // Increase particles based on hold duration
-                while (particles.length < baseParticleCount + maxExtraParticles * holdProgress) {
-                    particles.push(new Particle(touchPos.x, touchPos.y));
+                // Add particles while holding
+                if (particles.length < maxParticles && frameCount % 2 === 0) {
+                    particles.push(new Particle(
+                        attractPoint.x + random(-50, 50),
+                        attractPoint.y + random(-50, 50)
+                    ));
                 }
-                
-                // Update glow intensity
-                glowIntensity = lerp(0.2, 1, holdProgress);
             } else {
-                holdDuration = max(0, holdDuration - deltaTime * 2);
-                glowIntensity = lerp(0.2, 0, 1 - (holdDuration / maxHoldTime));
-                
-                // Remove extra particles
-                while (particles.length > baseParticleCount) {
-                    particles.pop();
-                }
+                holdDuration = max(holdDuration - 2, 0);
+                touchGlow = map(holdDuration, 0, 120, 60, 120);
             }
 
             // Update and draw particles
@@ -140,46 +146,46 @@
                 p.update();
                 p.draw();
             }
+
+            // Gradually remove particles when not holding
+            if (!mouseIsPressed && !touches.length && particles.length > maxParticles/2 && frameCount % 10 === 0) {
+                particles.pop();
+            }
         }
 
         function mousePressed() {
-            isHolding = true;
-            touchPos = createVector(mouseX, mouseY);
+            attractPoint = createVector(mouseX, mouseY);
         }
 
         function mouseDragged() {
-            touchPos = createVector(mouseX, mouseY);
+            attractPoint = createVector(mouseX, mouseY);
         }
 
         function mouseReleased() {
-            isHolding = false;
-            touchPos = null;
+            attractPoint = null;
         }
 
-        function windowResized() {
-            resizeCanvas(windowWidth, windowHeight);
-        }
-
-        // Mobile support
         function touchStarted() {
             if (touches.length > 0) {
-                isHolding = true;
-                touchPos = createVector(touches[0].x, touches[0].y);
+                attractPoint = createVector(touches[0].x, touches[0].y);
             }
             return false;
         }
 
         function touchMoved() {
             if (touches.length > 0) {
-                touchPos = createVector(touches[0].x, touches[0].y);
+                attractPoint = createVector(touches[0].x, touches[0].y);
             }
             return false;
         }
 
         function touchEnded() {
-            isHolding = false;
-            touchPos = null;
+            attractPoint = null;
             return false;
+        }
+
+        function windowResized() {
+            resizeCanvas(windowWidth, windowHeight);
         }
     </script>
 </body>
